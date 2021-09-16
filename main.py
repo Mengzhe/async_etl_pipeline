@@ -1,18 +1,16 @@
 # https://www.vinta.com.br/blog/2021/etl-with-asyncio-asyncpg/
 
 import asyncio
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import text
 from sqlalchemy import Column, String, Integer, Numeric, DateTime
 import datetime
-import pydantic
 from typing import *
 
 
@@ -36,10 +34,15 @@ class RecordTransform(Base):
     Ticker = Column(String, primary_key=True, nullable=False)
     DateTicker = Column(String, nullable=False)
 
-class RecordModel_Transformed(pydantic.BaseModel):
-    Date: datetime.datetime
-    Ticker: str
-    DateTicker: Optional[str]
+sync_engine = create_engine(DB_URL)
+Session = sessionmaker(sync_engine)
+syn_session = Session()
+
+# clear table: records_transformed
+syn_session.query(RecordTransform).delete()
+syn_session.commit()
+
+Base.metadata.create_all(sync_engine)  # create new database/tables
 
 Async_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5434/stockdata"
 async_engine = create_async_engine(Async_DB_URL, echo=False)
@@ -48,27 +51,10 @@ async_session = sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
 )
 
-# async def test_db():
-#     async with async_session() as session:
-#         query = select(Record).limit(10)
-#         query_res = await session.execute(query)
-#         query_res = query_res.all()
-#         query_res = [(q.Ticker, q.Date.date().strftime("%m/%d/%Y")) for (q,) in query_res]
-#         return query_res
-
-async def test_db():
-    async with async_session() as session:
-        async for record in extract(session):
-            record = record[0]
-            # print(record.Date, record.Ticker)
-            # print(RecordModel_Transformed(Date=record.Date,
-            #                   Ticker=record.Ticker))
 
 async def extract(session: AsyncSession):
-    # query = "SELECT name, age FROM input_table"
-    query = select(Record).limit(100)
+    query = select(Record).limit(1000)
     async_result = await session.stream(query)
-    # print(type(async_result))
     async for record in async_result:
         yield record
 
@@ -76,20 +62,66 @@ async def producer(queue: asyncio.Queue):
     async with async_session() as session:
         async for record in extract(session):
             record = record[0]
-            await queue.put()
+            # print(queue.qsize())
+            await queue.put(record)
         await queue.put(None)
+    # return "producer is finished."
+
+
+def transform(batch: List[Record]) -> List[RecordTransform]:
+    res = []
+    for record in batch:
+        transformed = RecordTransform(Date=record.Date,
+                                      Ticker=record.Ticker,
+                                      DateTicker=record.Date.date().strftime("%m/%d/%Y") + "_" + record.Ticker)
+        res.append(transformed)
+    return res
+
+async def consumer(loop,
+                   pool,
+                   queue: asyncio.Queue,
+                   batch_size: int = 32):
+    async with async_session() as session:
+        task_set = set()
+        batch = []
+        while True:
+            record = await queue.get()
+            queue.task_done()
+
+            if record is not None:
+                batch.append(record)
+
+            if len(batch) == batch_size or record is None:
+                task = loop.run_in_executor(pool, transform, batch)
+                task_set.add(task)
+                batch = []
+                if len(task_set) >= pool._max_workers:
+                    done_set, task_set = await asyncio.wait(task_set,
+                                                            return_when=asyncio.FIRST_COMPLETED)
+
+                    if len(done_set)>0:
+                        for done_task in done_set:
+                            res = await done_task
+                            session.add_all(res)
+                        await session.commit()
+
+                if record is None:
+                    break
+
+        remaining_results = await asyncio.gather(*task_set)
+        for results in remaining_results:
+            session.add_all(results)
+        await session.commit()
+        # print("consumer finished")
+
+
 
 async def etl():
-    with ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as pool:
-        queue = asyncio.Queue()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        queue = asyncio.Queue(maxsize=1000)
         loop = asyncio.get_running_loop()
-
-
-
-# loop = asyncio.get_event_loop()
-# res = loop.run_until_complete(test_db())
-# res = asyncio.run(test_db())
-# print(res)
-# loop.run_until_complete(test_db())
+        await asyncio.gather(producer(queue),
+                             consumer(loop, pool, queue),
+                             )
 
 asyncio.run(etl())
