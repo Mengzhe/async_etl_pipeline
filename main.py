@@ -55,7 +55,6 @@ async_session = sessionmaker(
 )
 
 
-
 async def extract(session: AsyncSession, total_size: int = 1000):
     '''
     Extract data from database: async generator
@@ -81,7 +80,6 @@ async def producer(queue: asyncio.Queue, total_size: int = 1000) -> None:
         # append "None" as the last token
         await queue.put(None)
     # return "producer is finished."
-
 
 def transform(batch: List[Record]) -> List[RecordTransform]:
     '''
@@ -144,8 +142,6 @@ async def consumer(loop,
             session.add_all(results)
         await session.commit()
         # print("consumer finished")
-
-
 
 async def etl() -> None:
     '''
