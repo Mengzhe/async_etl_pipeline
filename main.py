@@ -122,7 +122,7 @@ async def consumer(loop,
                 task = loop.run_in_executor(pool, transform, batch)
                 task_set.add(task)
                 batch = []
-                # ensure that there are the number of running tasks is less than pool._max_workers
+                # ensure that the number of running tasks is less than pool._max_workers
                 if len(task_set) >= pool._max_workers:
                     done_set, task_set = await asyncio.wait(task_set,
                                                             return_when=asyncio.FIRST_COMPLETED)
