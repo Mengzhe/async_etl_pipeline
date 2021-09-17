@@ -99,7 +99,7 @@ def transform(batch: List[Record]) -> List[RecordTransform]:
     return res
 
 async def consumer(loop,
-                   pool: ThreadPoolExecutor,
+                   pool: Union[ThreadPoolExecutor, ProcessPoolExecutor],
                    queue: asyncio.Queue,
                    batch_size: int = 32):
     '''
@@ -153,14 +153,16 @@ async def etl() -> None:
     :return:
     '''
     with ThreadPoolExecutor(max_workers=2) as pool:
+    # with ProcessPoolExecutor(max_workers=2) as pool:
         queue = asyncio.Queue(maxsize=1000)
         loop = asyncio.get_running_loop()
         await asyncio.gather(producer(queue, total_size=1000),
                              consumer(loop, pool, queue, batch_size=32),
                              )
 
-t_start = time.perf_counter()
-asyncio.run(etl())
-t_stop = time.perf_counter()
-print("Elapsed time during the whole program in seconds:",
-                                        t_stop-t_start)
+if __name__ == '__main__':
+    t_start = time.perf_counter()
+    asyncio.run(etl())
+    t_stop = time.perf_counter()
+    print("Elapsed time during the whole program in seconds:",
+                                            t_stop-t_start)
