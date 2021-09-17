@@ -14,6 +14,7 @@ import datetime
 from typing import *
 import time
 
+
 # Define database
 # access database using both synchronous and asynchronous approaches
 
@@ -89,11 +90,12 @@ def transform(batch: List[Record]) -> List[RecordTransform]:
     '''
     res = []
     for record in batch:
-        time.sleep(0.005)
+        # time.sleep(0.005)
         transformed = RecordTransform(Date=record.Date,
                                       Ticker=record.Ticker,
                                       DateTicker=record.Date.date().strftime("%m/%d/%Y") + "_" + record.Ticker)
         res.append(transformed)
+    time.sleep(0.5)
     return res
 
 async def consumer(loop,
@@ -154,7 +156,11 @@ async def etl() -> None:
         queue = asyncio.Queue(maxsize=1000)
         loop = asyncio.get_running_loop()
         await asyncio.gather(producer(queue, total_size=1000),
-                             consumer(loop, pool, queue),
+                             consumer(loop, pool, queue, batch_size=32),
                              )
 
+t_start = time.perf_counter()
 asyncio.run(etl())
+t_stop = time.perf_counter()
+print("Elapsed time during the whole program in seconds:",
+                                        t_stop-t_start)
