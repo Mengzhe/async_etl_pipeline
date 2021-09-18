@@ -13,6 +13,7 @@ from sqlalchemy import Column, String, Integer, Numeric, DateTime
 import datetime
 from typing import *
 import time
+import functools
 
 
 # Define database
@@ -98,6 +99,23 @@ def transform(batch: List[Record]) -> List[RecordTransform]:
     time.sleep(0.5)
     return res
 
+
+def transform_kwarg(batch: List[Record], *, kwarg0, kwarg1) -> List[RecordTransform]:
+    '''
+    Dummy transformation function with keyword arguments
+    :param batch:
+    :return:
+    '''
+    res = []
+    for record in batch:
+        # time.sleep(0.005)
+        transformed = RecordTransform(Date=record.Date,
+                                      Ticker=record.Ticker,
+                                      DateTicker=record.Date.date().strftime("%m/%d/%Y") + "_" + record.Ticker)
+        res.append(transformed)
+    time.sleep(0.5)
+    return res
+
 async def consumer(loop,
                    pool: Union[ThreadPoolExecutor, ProcessPoolExecutor],
                    queue: asyncio.Queue,
@@ -121,7 +139,13 @@ async def consumer(loop,
                 batch.append(record)
 
             if len(batch) == batch_size or record is None:
-                task = loop.run_in_executor(pool, transform, batch)
+                # task = loop.run_in_executor(pool, transform, batch)
+                ## use functools.partial for keyword arguments
+                task = loop.run_in_executor(pool,
+                                            functools.partial(transform_kwarg,
+                                                              kwarg0=1,
+                                                              kwarg1=2),
+                                            batch)
                 task_set.add(task)
                 batch = []
                 # ensure that the number of running tasks is less than pool._max_workers
